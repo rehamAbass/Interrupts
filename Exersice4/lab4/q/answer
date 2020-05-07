@@ -1,0 +1,215 @@
+/////////////////////////////////////////////////////////////////////////////////////					LAB 4 - real Time
+//////					written by :  Biata geilikberg []   & Reham Abass []
+#include <stdio.h>
+#include <dos.h>
+#include <string.h>
+#include <time.h>
+#include <stdlib.h>
+////////////////////////////////////////////////////////////////////////////////
+#define ON (1) 		// for the use of ChangeSpeaker
+#define OFF (0)		//for the use of ChangeSpeaker
+////////////////////////////////////////////////////////////////////////////////
+volatile int count;						//for the use of interrupt 8 
+volatile int total_time = 0;				//total time of the program - must be 10 seconds
+volatile int counter = 0;				//for the use of interrpt 8 - my 8
+volatile char* string1;					//our string
+volatile char string2[256];				//static array string for the input string
+volatile int pressed =0;				//for checking pressed- released
+volatile int index2=0;					//index in the input string
+volatile int pressedCounter=0;		//counts time from the begining of pressing the input string
+volatile int endCounter;				//saves the time it tooks to press the string
+/////////////////////////////////////////////////////////////////////////
+void interrupt(*old9) (void); 
+void interrupt(*old8) (void);  
+/////////////////////////////////////////////////////////////////////////////
+void start();							//initations
+void end();								//the last mission when passed the total time- 10 secs  
+char ReadBuffer();						//read each letter pressed
+void input(char isc);					//update string2 -the input string
+void callSound();						//callfunction  Sound 
+void mydelay(int n);					//delay- time it takes to hear the sound 
+void NoSound( );						//stop the sound -update speakers OFF
+void ChangeSpeaker(int status);		//Turn speaker on or off
+void Sound(int hrtz);     				//activate channel 2 
+/////////////////////////////////////////////////////////////////
+void interrupt my9(void){
+	old9();
+		pressed++;
+		endCounter =pressedCounter /18;
+		if(pressed%2==1)				//it was press not release
+		{
+			input(ReadBuffer()); 		//read char and save in the input string
+		}
+}
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void interrupt my8(void)
+{
+	old8();
+	counter++;				            	// counter for the time 
+	count++;						            //for the use in the delay function
+	if(pressed >=0) pressedCounter++;   //just after the first press , start count the time 
+	if (counter == total_time*18)			//the total time finishes
+	{
+	end();
+	}
+}
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void mydelay(int n) // 36h = 00110110 timer command ,select channel 0
+{
+        asm {
+          CLI
+          PUSH AX
+          MOV AL,036h
+          OUT 43h,AL
+          MOV AX,11932    // result of desired latch = 99.99 | 1.19318*10^6/11932=99.99
+          OUT 40h,AL      // LSB
+          MOV AL,AH
+          OUT 40h,AL      // MSB
+          POP AX
+        } // asm
+
+   old8 = getvect(8);
+    setvect(8,my8);
+    asm  { STI};          // if there's interrupts off(bit=1) then -> start them (bit=0)
+    count = 0;
+    while(count <= n*100);
+
+        asm {
+          CLI              // if there's interrupts on(bit=0) then -> shutdown them (bit=1)
+          PUSH AX
+          MOV AL,036h      // 36h = 00110110 timer command ,select channel 0
+          OUT 43h,AL
+          MOV AX,0         // change latch to 18 as origanl before the changes
+          OUT 40h,AL
+          MOV AL,AH
+          OUT 40h,AL 
+          POP AX
+        } // asm
+    setvect(8,old8);   // original old 8 
+} //mydelay
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/*------------------------------------------------
+ ChangeSpeaker - Turn speaker on or off. */
+ void ChangeSpeaker( int status )
+ {
+  int portval; 
+//   portval = inportb( 0x61 );
+      portval = 0;
+   asm {
+        PUSH AX
+        IN AL,61h
+        MOV byte ptr portval,AL
+        POP AX
+       }
+
+    if ( status==ON )
+     portval |= 0x03;
+      else
+       portval &=~ 0x03;
+        // outportb( 0x61, portval );
+        asm {
+          PUSH AX
+          MOV AX,portval
+          OUT 61h,AL
+          POP AX
+        } // asm
+	} /*--ChangeSpeaker( )----------*/
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+	void Sound( int hertz )
+	{
+	 unsigned divisor = 1193180L / hertz;
+	  ChangeSpeaker( ON );
+   //        outportb( 0x43, 0xB6 ) B6h = 10110110  select channel 2 for sound, RW LSB and then MSB, mode 3, in binary
+        asm {
+          PUSH AX
+          MOV AL,0B6h
+          OUT 43h,AL
+          POP AX
+        } // asm
+     //       outportb( 0x42, divisor & 0xFF )  transfer LSB first
+        asm {
+          PUSH AX
+          MOV AX,divisor
+          AND AX,0FFh
+          OUT 42h,AL
+          POP AX
+        } // asm
+     //        outportb( 0x42, divisor >> 8 )  transfer MSB second
+        asm {
+          PUSH AX
+          MOV AX,divisor
+          MOV AL,AH
+          OUT 42h,AL
+          POP AX
+        } // asm
+	     } /*--Sound( )-----*/
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+      void NoSound( )			// stop the speaker 
+        {
+             ChangeSpeaker( OFF );
+        } /*--NoSound( )------*/
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+     void callSound(  ){
+	  int r;
+	  srand(time(NULL));  			 // Initialization, should only be called once.
+	 r = (rand()%301 )+300; 		// the random value is between 300 - 600 
+           Sound( r);
+           mydelay( endCounter );	//let the delay to be as long as the time the user took to press the string
+           NoSound( );				// speaker OFF
+        }
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void end() // Exit the program
+{
+	setvect(8,old8);
+	setvect(9, old9);
+
+		if(strcmp(string1,string2) == 0){
+		printf("\nIn %d seconds \nYou did it!",total_time );
+		callSound();						// if success so let us hear the victory sound 
+	}
+	else {
+		printf("\nIn %d seconds\nYou goofed: you typed: %s",total_time ,string2);
+	}
+	exit(1);
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void start(){				//initiations
+	old8 = getvect(8);		//save old interrupt  8 vector
+	old9 =getvect(9);		//save old interrupt  9 vector
+	setvect(8, my8);		//set new interrupt fuction
+	setvect(9,my9);			//set new interrupt fuction
+}	
+///////////////////////////////////////////////////////////////////////////////////////////
+char ReadBuffer(){			//read one char - INT 16h - Ascii code
+	char ascii_code;
+	asm{
+		PUSH 	AX
+		MOV	AH,0
+		INT 	16h
+		MOV 	ascii_code,AL
+		POP 	AX
+	}
+	return ascii_code;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////
+void tsttype(char str[], int t){
+
+	total_time =t;
+	string1 =str;
+	printf("\nstring1 = %s\n",str);
+	start();
+	while(1) { }
+}
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void input(char ascii_code) // Prints a char to "pos" at the screen
+{
+	char c =ascii_code;
+	string2[index2]= c;		//save each char to the input string 
+	index2++;				//increase the index of the input string 
+}
+///////////////////////////////////////////////////////////////////////////
+void main(){
+	 tsttype("To be or not to be", 10); 		// let the game begin !
+}
+//////////////////////////////////////////////////////////////////////
+
