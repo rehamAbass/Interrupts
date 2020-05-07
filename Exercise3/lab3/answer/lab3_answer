@@ -1,0 +1,346 @@
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////			LAB 3  - Real Time and Operating Systems Course 
+/////////////////////			was written by : Reham Abass [] and Biata  geilikberg[ ]
+#include <stdio.h>
+#include <dos.h>
+#include <string.h>
+////////////////////////////////////////////////////////////////////////////////
+volatile int total_time = 0;
+volatile int counter = 0;
+volatile int current_cursor_position = 0;
+char* names="reham biata";
+/////////////////////////////////////////////////////////////////////////
+void interrupt(*old9) (void); 
+void interrupt(*old8) (void);  
+/////////////////////////////////////////////////////////////////////////////
+void start();
+void F1();
+void F2();
+void Esc();
+void Shift();
+void goUp();
+void goLeft();
+void goRight();
+void goDown();
+void setCursorPos(int position);
+char getAsciiCode();						
+void PrintChar(int pos, char input_ch, char color);
+void DisplayNames();
+/////////////////////////////////////////////////////////////////
+void interrupt my9(void)
+{
+	volatile int pressed;
+	int scan_code ;
+	old9();
+	asm{
+		PUSH 	AX
+		IN   	AL,60h			// Read keyboard input
+		PUSH 	AX 				// Save keyboard input.AL = Scan code
+		IN   	AL,61h		 	// Read port 61h
+		OR   	AL,80h 			// Set keyboard acknowledge signal
+		OUT  	61h,AL 			// Send keyboard acknowledge signal
+		AND  	AL,7Fh 			// Reset keyboard acknowledge signal
+		OUT  	61h,AL
+		POP  	AX
+		MOV  	AH,0
+		MOV	 scan_code,AX
+		AND  	AL,80h
+		MOV  	pressed, AX
+		POP  	AX
+	} 
+	
+		if (pressed == 0)
+		{
+			
+			switch (scan_code) {		//scan code
+				case 1: 	{		// Esc pressed
+					Esc();
+					break;
+				}
+				case 42:{		 // Left Shift pressed
+					Shift();
+					break;
+				}
+				case 54:{		 // Right Shift pressed
+					Shift();
+					break;
+				}
+				case 59:{		 // F1 Pressed
+					F1();
+					break;
+				}
+				case 60: {		// F2 Pressed
+					F2();
+					break;
+				}
+				case 72:{ 		// Up Arrow Pressed
+					goUp();
+					break;
+				}
+				case 75:{		 // Left Arrow Pressed
+					goLeft();
+					break;
+				}
+				case 77:{		 // Right Arrow Pressed
+					goRight();
+					break;
+				}
+				case 80:{		 // Down Arrow Pressed
+					goDown();
+					break;
+				}
+				default: {
+					PrintChar(current_cursor_position, getAsciiCode(), 7); 
+					break;
+				}
+			}
+			getAsciiCode();	
+		}
+}
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void interrupt my8(void){
+	old8();
+	counter++;
+	if (counter >= total_time*18)
+	{
+		Esc();
+	}
+}
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void Esc() 								// Exit the program
+{
+	setvect(8,old8);
+	setvect(9, old9);
+	asm{
+		PUSH	AX
+		MOV  	AX,2
+		INT  10h
+		POP AX
+	}
+	exit(1);
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void F1()							 // Make cursor MAX
+{
+	asm{
+		PUSH 	AX
+		PUSH 	DX
+		MOV		DX,3D4h		 // Point TO 3D4h - 3D5h port pair
+		MOV		AX,000Ah 		 // Cursor start address(0Ah) - Value 0 (00h)
+		OUT		DX,AX			 // Port(3D4h) = 0Ah, Port(3D5h) = 01h
+		MOV		AX,0F0Bh 		// Cursor end address - Value 15 (0Eh)
+		OUT		DX,AX	 		// Port(3D4h) = 0Bh, Port(3D5h) = 0Eh
+		POP 	DX
+		POP 	AX
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////
+void F2()							 // Make cursor MIN
+{
+	asm{
+		PUSH	AX
+		PUSH	DX
+		MOV		DX, 3D4h  		// Point to 3D4H - 3D5H port pair
+		MOV		AX, 0E0Ah 		// Cursor start address(0Ah) - Value 14 (0Dh)
+		OUT		DX, AX	  		// Port(3D4h) = 0Ah, Port(3D5h) = 01h
+		MOV		AX, 0F0Bh 		// Cursor end address - Value 15 (0Eh)
+		OUT		DX, AX	 		 //Port(3D4h) = 0Bh, Port(3D5h) = 0Eh
+		POP 	DX
+		POP 	AX
+	}
+}
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void Shift() {		//start at the bottom of the screen to scroll 
+					
+asm{
+mov AX, 0XB800
+mov es, ax
+mov ds, ax
+mov di, 3840      	//;Address of 25th row
+cld
+}
+K:
+asm{
+lea si, [di-160] 		// ;Address of row above
+mov cx, 80			//
+rep movsw      		//copy  row to the next row
+sub di, 320			//go two rows up
+jne K           		  //;DI=0 is end
+}
+asm{				// fill the first row with spaces
+	mov ax,0XB800
+	mov es,ax		// es pointer on B800
+	mov di,0		//first index =0
+	mov al,' '		//add spaces
+	mov ah,0		//black color
+	mov cx,40		//one row
+	}
+	loop2:
+	asm{
+		mov es:[di],ax	//copy the space to the screen memory
+		add di,2		//increase the index
+		Loop loop2	// loop on all row
+	}
+
+
+}
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void goUp()		 // Move cursor 1 step up
+{
+	if (current_cursor_position > 39)	// not in first row
+	{
+		setCursorPos(current_cursor_position-40);
+		current_cursor_position -= 40;
+	}
+}
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void goRight() 		// Move cursor 1 step right
+{
+	if(current_cursor_position%40 != 39)  //not in the end of row
+	{
+		setCursorPos(current_cursor_position+1);
+		current_cursor_position += 1;
+	}
+}
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void goLeft() 		// Move cursor 1 step  left
+{
+	if (current_cursor_position%40 != 0) // not in begining of row
+	{
+		setCursorPos(current_cursor_position-1);
+		current_cursor_position -= 1;
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void beginingOfLine(){
+	int count =0;
+	int pos =current_cursor_position;
+	while(pos%40 != 0) 				//if not first column
+	{
+		pos--;
+		count++;						//count number of columns
+	}
+	current_cursor_position -= count; //minus number of columns it has
+	setCursorPos(current_cursor_position);	
+}
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void goDown()						 // Move cursor 1 step down
+{
+	if (current_cursor_position < 960)   //not in the last row
+	{
+		setCursorPos(current_cursor_position+40);
+		current_cursor_position += 40;
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void start() 
+{
+	asm{
+		PUSH 	AX
+		PUSH 	DI
+		PUSH	ES
+		PUSH	CX
+		MOV		AH,0			 // Select function = 'Set mode'
+		MOV		AL,1 			// 40 by 25 color image
+		INT		10h				 // Adapter initialized.Page 0 displayed
+
+		MOV		AX,0B800h		 // Segment address of memory on color adapter
+
+		MOV		ES, AX 			// Set up extra segment register
+		MOV		DI, 0 			 // Initial offset address into segment
+		MOV		AL, ' ' 			// Character space to fill adapter memory
+		MOV		AH, 03h		 // Attribute byte 
+		MOV		CX, 1000		 // Initialize count, 1 Screen
+		CLD						// Write forward
+		REP		STOSW 		// Write
+		POP		CX
+		POP		ES
+		POP		DI
+		POP		AX
+	}
+	total_time =60;
+	old9= getvect(9);
+	setvect(9, my9);
+	old8 = getvect(8);
+	setvect(8, my8);
+	DisplayNames();
+}
+///////////////////////////////////////////////////////////////////////////////////////////
+char getAsciiCode(){
+	char ascii_code;
+	asm{
+		PUSH 	AX
+		MOV	AH,0
+		INT 	16h
+		MOV 	ascii_code,AL  // al has ths ascii code after interrupt
+		POP 	AX
+	}
+	return ascii_code;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////
+void setCursorPos(int position) {
+	asm{
+		PUSH 	BX
+		PUSH 	DX
+		PUSH 	AX
+		MOV		BX, position
+		MOV		DX, 3D4H 			// Point to 3D4H - 3D5H port pair
+		MOV		AL, 14				 // Address of cursor register pos high byte
+		MOV		AH, BH 			// Get desired value of cursor pos high byte
+		OUT		DX, AX 				// Port(3D4h) = 14, Port(3D5h) = Value of BH
+
+		MOV		AL, 15 				// Address of cursor register pos low byte
+		MOV		AH, BL				 // Get desired value pf cursor pos low byte
+		OUT		DX, AX 				// Port(3D4h) = 15, Port(3D5h) = Value of BL
+		POP 	AX
+		POP 	DX
+		POP 	BX
+	}
+}
+///////////////////////////////////////////////////////////////////////////////////////////
+void DisplayNames() 
+{
+	int i = 0;
+	char ch;
+	int pos;
+	current_cursor_position = 999;   // iniation of the position of the cusor to the last position
+	setCursorPos(999);
+	for (i = 0; i < strlen(names); i++)
+	{
+		pos = (12 * 40 + 15 + i);   //position of the names is the middle of the screen
+		ch = names[i];
+		PrintChar(pos, ch, 12);   // color red = 12
+	}
+}
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void PrintChar(int p, char ascii_code, char color) // Prints a char to "pos" at the screen
+{
+	int print_pos = p*2;
+	if(ascii_code >= 'a' && ascii_code <= 'z'){
+		asm{ 
+			PUSH 	AX 
+			PUSH 	ES
+			PUSH 	SI
+			PUSH 	BX
+			MOV     AX,0B800h			 // Segment address of memory on color adapter
+			MOV     ES,AX 					// Set up extra segment register
+			MOV     SI,0 					// Initial offset address into segment
+			MOV 	SI,print_pos 			// Moving to SI the position on the screen we want to print to
+			MOV 	BL,ascii_code			// Moving to BL the char we want to print
+			MOV	BH,color				// Attributes
+			MOV 	WORD PTR ES:[SI], BX	// Printing
+			POP 	BX
+			POP 	SI
+			POP 	ES
+			POP 	AX
+		}
+		}else if(ascii_code == 0){ // ascii == 0
+		 beginingOfLine();
+		}
+}
+///////////////////////////////////////////////////////////////////////////
+void main(){
+	start();
+	while(1) {}
+}
+//////////////////////////////////////////////////////////////////////
