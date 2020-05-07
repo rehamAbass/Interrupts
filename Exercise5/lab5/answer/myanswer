@@ -1,0 +1,319 @@
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Lab 5 - realTime
+//	written by :  Biata geilikberg []   & Reham Abass []
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#include <stdio.h>
+#include <string.h>
+#include<ctype.h>
+#include<stdlib.h>
+#include<dos.h>
+////////////////////////////////////////////////////////
+// Rate = 0110 , counter , base  =010
+///////////////////////////////////////////////////////
+void interrupt(*old70) (void); 
+void interrupt(*Int9Save)(void);
+void interrupt myISR9(void); 
+void interrupt my70(void); 
+///////////////////////////////////////////////////////
+volatile long count=0;
+volatile long maxCount=0;
+volatile char old_0A1h,old_70h;
+volatile char str[16];
+volatile int flag;
+
+int convert_to_binary(int x);
+void readclk(char str[]);
+void printDayOfWeek();
+void printDate();
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+int convert_to_binary(int x)
+{
+	int i;
+	int temp, scale, result;
+	temp = 0;
+	scale = 1;
+	for (i = 0; i < 4; i++)
+	{
+		temp = temp + (x % 2)*scale;
+		scale *= 2;
+		x = x >> 1;
+	} // for
+	result = temp;
+	temp = 0;
+	scale = 1;
+	for (i = 0; i < 4; i++)
+	{
+		temp = temp + (x % 2)*scale;
+		scale *= 2;
+		x = x >> 1;
+	} // for
+	temp *= 10;
+	result = temp + result;
+	return result;
+} // convert_to_binary
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void readclk(char str[])
+{
+	int hour, min, sec;
+	hour = min = sec = 0;
+	asm{
+		PUSH AX
+		MOV AL, 0
+		OUT 70h, AL
+		IN AL, 71h
+		MOV BYTE PTR sec, AL
+		;
+		MOV AL, 2
+			OUT 70h, AL
+			IN AL, 71h
+			MOV BYTE PTR min, AL
+			;
+		MOV AL, 4
+			OUT 70h, AL
+			IN AL, 71h
+			MOV BYTE PTR hour, AL
+			;
+		POP AX
+	} // asm
+	sec = convert_to_binary(sec);
+	min = convert_to_binary(min);
+	hour = convert_to_binary(hour);
+	sprintf(str, "%d:%d:%d", hour, min, sec);
+	
+} // readclk
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void printDayOfWeek()
+{
+	char dayOfWeek;
+	asm{
+		PUSH AX
+		MOV AL, 6 /* read the day of week */
+		OUT 70h, AL
+		IN AL, 71h
+		MOV dayOfWeek, AL
+		POP AX
+	}
+	
+	switch(dayOfWeek){
+		case 1: 	printf("\nToday is Sun.\n");break;	
+		case 2: 	printf("\nToday is Mon.\n");break;
+		case 3: 	printf("\nToday is Tue.\n");break;
+		case 4: 	printf("\nToday is Wed.\n");break;
+		case 5: 	printf("\nToday is Thu.\n");break;
+		case 6: 	printf("\nToday is Fri.\n");break;
+		case 7: 	printf("\nToday is Sat.\n");break;
+		default: break;
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void printDate()
+{
+	int day, month, year;
+	day = month = year = 0;
+	asm{
+		PUSH AX
+		MOV AL, 7 /* read the day of month */
+		OUT 70h, AL
+		IN AL, 71h
+		MOV BYTE PTR day, AL
+		MOV AL, 8 /* read the month */
+		OUT 70h, AL
+		IN AL, 71h
+		MOV BYTE PTR month, AL
+		MOV AL, 9 /* read the year */
+		OUT 70h, AL
+		IN AL, 71h
+		MOV BYTE PTR year, AL
+		POP AX
+	}
+	day = convert_to_binary(day);
+	month = convert_to_binary(month);
+	year = convert_to_binary(year);
+	printf("\n%d/%d/%d\n", day, month, year);
+}
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void interrupt  my70(void){
+asm {
+   PUSH AX
+   PUSH BX
+   IN AL,70h   // Read existing port 70h
+   MOV BX,AX
+
+   MOV AL,0Ch  // Set up "Read status register C"
+   OUT 70h,AL  //
+   MOV AL,8Ch  //
+   OUT 70h,AL  //
+   IN AL,71h
+   MOV AX,BX   //  Restore port 70h
+   OUT 70h,AL  // 
+
+   MOV AL,20h   // Set up "EOI" value  
+   OUT 0A0h,AL  // Notify Secondary PIC
+   OUT 020h,AL  // Notify Primary PIC
+
+   POP BX
+   POP AX
+
+  } // asm */
+    count++;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void interrupt myISR9() //function that deals with the keyboard interrupt
+{
+	
+	char inp_char,scan_temp;
+	
+	Int9Save();
+	asm{
+	PUSH AX
+	MOV AH,1
+	INT 16h
+	PUSHF
+	POP AX
+	AND AX,64  //zero flag
+	MOV WORD PTR flag,AX
+	POP AX
+	} /* checking if button was presed*/
+
+
+		
+		if (flag == 0)
+		{
+			asm{
+				MOV AH,0;
+				INT 16h; /* BIOS read char from buffer        */
+				MOV scan_temp,AH; /* Transfer scan code to program     */
+				MOV inp_char,AL; /* Transfer char to program  this is the char that we get from keyboard        */
+				}
+		     
+
+			if (inp_char == 'A') 
+			{
+				printf("\nA\nFrom A to A:  %ld sec.\n",(count/1000));
+				if(maxCount <(count/1000))maxCount =(count/1000);
+				count =0;
+			}
+			else if (inp_char == 'M') 
+			{
+				printf("\nM\n Max: %ld sec.\n",maxCount);
+			}
+			else if (inp_char == 'T') 
+			{
+				printf("\nT\t");
+				printDayOfWeek();
+			}
+			else if (inp_char == 'D') 
+			{
+				printf("\nD\t");
+				printDate();
+			}
+			else if(scan_temp==1) //esc
+			{
+				asm{
+					MOV AL,old_0A1h
+					OUT 0A1h,AL
+					IN AL,70h  // restore A status register
+					MOV AL,0Ah
+					OUT 70h,AL
+					MOV AL,8Ah
+					OUT 70h,AL
+					IN AL,71h
+					MOV AL,old_70h
+					OUT 71h,AL
+					IN AL,71h
+					} // asm
+				setvect(9,Int9Save);
+				setvect(0x70, old70);
+				flag=1;
+				exit(1);
+				
+			}
+
+		}
+		
+}
+
+	
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void main(){
+
+
+	old70 =getvect(0x70);		//first step - set new interrupt routine
+	Int9Save = getvect(9); 
+	setvect(0x70, my70);
+	setvect(9, myISR9); 
+	
+	
+ asm{
+   CLI         // Disable interrupts
+   PUSH AX     // Interrupt may occur while updating
+
+   IN AL,0A1h  // Make sure IRQ8 is not masked
+   MOV old_0A1h,AL
+   AND AL,0FEh // Set bit 0 of port 0A1 to zero
+   OUT 0A1h,AL //
+
+   IN AL,70h   // Set up "Write into status register A"
+   MOV AL,0Ah  //
+   OUT 70h,AL  //
+   MOV AL,8Ah  //
+   OUT 70h,AL  //
+   IN AL,71h   //
+  
+   MOV old_70h,AL
+   AND AL,11110000b // Change only Rate
+   OR AL,0110b // Make sure it is Rate =0110 (1Khz)
+   OUT 71h,AL  // Write into status register A
+   IN AL,71h   // Read to confirm write
+
+
+
+   IN AL,70h  // Set up "Write into status register B"
+   MOV AL,0Bh //
+   OUT 70h,AL //
+   MOV AL,8Bh //
+   OUT 70h,AL //
+   IN AL,71h  //
+ 
+   AND AL,8Fh // Mask out PI,AI,UI
+   OR AL,40h  // Enable periodic interrupts (PI=1) only
+   OUT 71h,AL // Write into status register  B
+   IN AL,71h  // Read to confirm write
+
+
+   IN AL,021h  // Make sure IRQ2 is not masked
+   AND AL,0FBh // Write 0 to bit 2 of port 21h
+   OUT 021h,AL // Write to port 21h
+
+   IN AL,70h  // Set up "Read into status resister C"
+   MOV AL,0Ch // Required for for "Write into port 71h"
+   OUT 70h,AL
+   IN AL,70h
+   MOV AL,8Ch // 
+   OUT 70h,AL
+   IN AL,71h  // Read status register C 
+              // (we do nothing with it)
+
+   IN AL,70h  // Set up "Read into status resister C"
+   MOV AL,0Dh // Required for for "Write into port 71h"
+   OUT 70h,AL
+   IN AL,70h
+   MOV AL,8Dh
+   OUT 70h,AL
+   IN AL,71h  // Read status register D 
+              // (we do nothing with it)
+   STI
+   POP AX
+  } // asm
+
+	printf("\n");		
+	while(1)
+	{
+		putchar(13);
+		readclk(str);
+		printf(str);
+	}
+}
+/////////////////////////////////////////////////////////
